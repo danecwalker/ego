@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash",
+      "WebFetch(domain:markphelps.me)",
+      "WebFetch(domain:testcontainers.com)",
+      "WebFetch(domain:www.bytebase.com)",
+      "WebFetch(domain:jmoiron.github.io)",
+      "WebFetch(domain:golang.testcontainers.org)",
+      "WebFetch(domain:www.dolthub.com)"
+    ]
+  }
+}
