@@ -132,6 +132,61 @@ func (b *EntityBuilder[T]) BelongsTo(fieldPtr any) *RelationshipBuilder {
 	return &RelationshipBuilder{rel: &b.schema.Relationships[len(b.schema.Relationships)-1]}
 }
 
+// HasOne registers a one-to-one relationship where the foreign key is on the
+// related entity's table. The fieldPtr must be a pointer to a *RelatedType
+// pointer field on the entity (e.g., &a.Profile).
+// For Author.HasOne(&a.Profile), the FK is "author_id" on the profiles table.
+func (b *EntityBuilder[T]) HasOne(fieldPtr any) *RelationshipBuilder {
+	ptrVal := reflect.ValueOf(fieldPtr).Pointer()
+	zeroVal := reflect.ValueOf(b.zero).Elem()
+	t := zeroVal.Type()
+
+	rel := &RelationshipSchema{Type: HasOneRel}
+
+	// Walk struct fields looking for the matching pointer-to-struct field by address.
+	findRelField(t, nil, zeroVal, ptrVal, rel)
+
+	if rel.FieldName != "" {
+		// Infer foreign key: lowercased parent type name + "_id"
+		parentName := t.Name()
+		rel.ForeignKey = strings.ToLower(parentName) + "_id"
+		b.schema.Relationships = append(b.schema.Relationships, *rel)
+	}
+
+	return &RelationshipBuilder{rel: &b.schema.Relationships[len(b.schema.Relationships)-1]}
+}
+
+// ManyToMany registers a many-to-many relationship via a pivot table.
+// The fieldPtr must be a pointer to a []RelatedType slice field on the entity
+// (e.g., &a.Tags).
+// For Article.ManyToMany(&a.Tags):
+//   - Pivot table: "article_tags" (singular owner + "_" + plural related)
+//   - PivotFKSelf: "article_id"
+//   - PivotFKOther: "tag_id"
+func (b *EntityBuilder[T]) ManyToMany(fieldPtr any) *RelationshipBuilder {
+	ptrVal := reflect.ValueOf(fieldPtr).Pointer()
+	zeroVal := reflect.ValueOf(b.zero).Elem()
+	t := zeroVal.Type()
+
+	rel := &RelationshipSchema{Type: ManyToManyRel}
+
+	// Walk struct fields looking for the matching slice field by address.
+	findRelField(t, nil, zeroVal, ptrVal, rel)
+
+	if rel.FieldName != "" {
+		ownerName := strings.ToLower(t.Name())
+		relatedName := strings.ToLower(rel.RelatedType.Name())
+
+		// Pivot table: singular owner + "_" + plural related
+		rel.PivotTable = ownerName + "_" + pluralize(relatedName)
+		rel.PivotFKSelf = ownerName + "_id"
+		rel.PivotFKOther = relatedName + "_id"
+		b.schema.Relationships = append(b.schema.Relationships, *rel)
+	}
+
+	return &RelationshipBuilder{rel: &b.schema.Relationships[len(b.schema.Relationships)-1]}
+}
+
 // findRelField walks a struct type recursively (flattening embedded structs)
 // to find a relationship field (slice or pointer-to-struct) matching ptrVal.
 // When found, it populates the RelationshipSchema with field metadata.

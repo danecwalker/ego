@@ -279,3 +279,78 @@ func Delete[T any](ex Executor, ctx context.Context, entity *T) error {
 
 	return nil
 }
+
+// Associate inserts rows into a pivot table for a ManyToMany relationship.
+// For each related entity, it inserts a row mapping the owner's PK to the
+// related entity's PK.
+func Associate[T any](ex Executor, ctx context.Context, owner *T, related ...any) error {
+	if owner == nil {
+		return fmt.Errorf("ego: Associate: owner must not be nil")
+	}
+
+	// Look up the owner's schema.
+	t := reflect.TypeOf((*T)(nil)).Elem()
+	schema := ex.schemaFor(t)
+	if schema == nil {
+		var err error
+		schema, err = parseAndRegister(ex, owner)
+		if err != nil {
+			return fmt.Errorf("ego: Associate: %w", err)
+		}
+	}
+	if schema.PrimaryKey == nil {
+		return fmt.Errorf("ego: Associate: owner entity has no primary key")
+	}
+
+	ownerVal := reflect.ValueOf(owner).Elem()
+	ownerID := ownerVal.FieldByIndex(schema.PrimaryKey.Index).Int()
+
+	d := ex.dialect()
+
+	for _, rel := range related {
+		relVal := reflect.ValueOf(rel)
+		if relVal.Kind() == reflect.Ptr {
+			relVal = relVal.Elem()
+		}
+		relType := relVal.Type()
+
+		// Find the ManyToMany relationship that matches this related type.
+		var relSchema *RelationshipSchema
+		for i := range schema.Relationships {
+			r := &schema.Relationships[i]
+			if r.Type == ManyToManyRel && r.RelatedType == relType {
+				relSchema = r
+				break
+			}
+		}
+		if relSchema == nil {
+			return fmt.Errorf("ego: Associate: no ManyToMany relationship found for %s on %s",
+				relType.Name(), t.Name())
+		}
+
+		// Get the related entity's PK value.
+		relEntitySchema, err := resolveSchemaForType(ex, relType)
+		if err != nil {
+			return fmt.Errorf("ego: Associate: %w", err)
+		}
+		if relEntitySchema.PrimaryKey == nil {
+			return fmt.Errorf("ego: Associate: related entity %s has no primary key", relType.Name())
+		}
+		relID := relVal.FieldByIndex(relEntitySchema.PrimaryKey.Index).Int()
+
+		// INSERT INTO pivot_table (self_fk, other_fk) VALUES (?, ?)
+		query := fmt.Sprintf("INSERT INTO %s (%s, %s) VALUES (%s, %s)",
+			d.QuoteIdentifier(relSchema.PivotTable),
+			d.QuoteIdentifier(relSchema.PivotFKSelf),
+			d.QuoteIdentifier(relSchema.PivotFKOther),
+			d.Placeholder(1),
+			d.Placeholder(2),
+		)
+
+		if _, err := ex.ExecContext(ctx, query, ownerID, relID); err != nil {
+			return fmt.Errorf("ego: Associate: %w", err)
+		}
+	}
+
+	return nil
+}

@@ -9,6 +9,8 @@ import (
 // AutoMigrate creates database tables for the given entities using
 // CREATE TABLE IF NOT EXISTS DDL. Each entity's schema is parsed (applying
 // any Configure customizations) and registered on the DB if not already present.
+// For entities with ManyToMany relationships, the corresponding pivot tables
+// are also created automatically.
 func AutoMigrate(db *DB, entities ...any) error {
 	for _, entity := range entities {
 		schema, err := parseAndRegister(db, entity)
@@ -19,6 +21,18 @@ func AutoMigrate(db *DB, entities ...any) error {
 		ddl := generateCreateTable(db.dial, schema)
 		if _, err := db.sqlDB.Exec(ddl); err != nil {
 			return fmt.Errorf("ego: AutoMigrate: failed to create table %q: %w", schema.TableName, err)
+		}
+
+		// Create pivot tables for ManyToMany relationships.
+		for _, rel := range schema.Relationships {
+			if rel.Type != ManyToManyRel {
+				continue
+			}
+			pivotDDL := generatePivotTable(db.dial, &rel)
+			if _, err := db.sqlDB.Exec(pivotDDL); err != nil {
+				return fmt.Errorf("ego: AutoMigrate: failed to create pivot table %q: %w",
+					rel.PivotTable, err)
+			}
 		}
 	}
 	return nil
@@ -135,4 +149,32 @@ func generateColumnDef(d Dialect, schema *EntitySchema, col *ColumnSchema) strin
 // dialect TypeMapping lookups. For example: "int64", "string", "time.Time".
 func goTypeString(t reflect.Type) string {
 	return t.String()
+}
+
+// generatePivotTable produces a CREATE TABLE IF NOT EXISTS DDL statement for a
+// ManyToMany pivot table. The pivot table has two FK columns and a composite
+// primary key.
+func generatePivotTable(d Dialect, rel *RelationshipSchema) string {
+	var b strings.Builder
+
+	b.WriteString("CREATE TABLE IF NOT EXISTS ")
+	b.WriteString(d.QuoteIdentifier(rel.PivotTable))
+	b.WriteString(" (\n")
+	b.WriteString("  ")
+	b.WriteString(d.QuoteIdentifier(rel.PivotFKSelf))
+	b.WriteString(" ")
+	b.WriteString(d.TypeMapping("int64"))
+	b.WriteString(" NOT NULL,\n")
+	b.WriteString("  ")
+	b.WriteString(d.QuoteIdentifier(rel.PivotFKOther))
+	b.WriteString(" ")
+	b.WriteString(d.TypeMapping("int64"))
+	b.WriteString(" NOT NULL,\n")
+	b.WriteString("  PRIMARY KEY (")
+	b.WriteString(d.QuoteIdentifier(rel.PivotFKSelf))
+	b.WriteString(", ")
+	b.WriteString(d.QuoteIdentifier(rel.PivotFKOther))
+	b.WriteString(")\n)")
+
+	return b.String()
 }

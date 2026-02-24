@@ -264,6 +264,14 @@ func (q *QueryBuilder[T]) loadIncludes(schema *EntitySchema, results []T) error 
 			if err := q.loadBelongsTo(schema, rel, results); err != nil {
 				return err
 			}
+		case HasOneRel:
+			if err := q.loadHasOne(schema, rel, results); err != nil {
+				return err
+			}
+		case ManyToManyRel:
+			if err := q.loadManyToMany(schema, rel, results); err != nil {
+				return err
+			}
 		default:
 			return fmt.Errorf("ego: Include(%q): unsupported relationship type %d", inc, rel.Type)
 		}
@@ -480,6 +488,250 @@ func (q *QueryBuilder[T]) loadBelongsTo(schema *EntitySchema, rel *RelationshipS
 		if related, ok := indexed[fkVal]; ok {
 			entityVal.FieldByIndex(rel.FieldIndex).Set(related)
 		}
+	}
+
+	return nil
+}
+
+// loadHasOne implements eager loading for HasOne relationships.
+// Similar to HasMany but the FK is on the related entity, and we set a pointer
+// (not a slice) on the parent. If no related entity exists, the pointer stays nil.
+func (q *QueryBuilder[T]) loadHasOne(schema *EntitySchema, rel *RelationshipSchema, results []T) error {
+	if schema.PrimaryKey == nil {
+		return fmt.Errorf("ego: Include: parent entity %s has no primary key", schema.GoType.Name())
+	}
+
+	// Resolve the related entity's schema.
+	relSchema, err := resolveSchemaForType(q.ex, rel.RelatedType)
+	if err != nil {
+		return fmt.Errorf("ego: Include(%q): %w", rel.FieldName, err)
+	}
+
+	// Collect parent IDs.
+	parentIDs := make([]any, len(results))
+	for i := range results {
+		entityVal := reflect.ValueOf(&results[i]).Elem()
+		parentIDs[i] = entityVal.FieldByIndex(schema.PrimaryKey.Index).Int()
+	}
+
+	// Build: SELECT ... FROM related_table WHERE fk_col IN (?, ?, ?)
+	d := q.ex.dialect()
+	var sb strings.Builder
+	sb.WriteString("SELECT ")
+	for i, col := range relSchema.Columns {
+		if i > 0 {
+			sb.WriteString(", ")
+		}
+		sb.WriteString(d.QuoteIdentifier(col.DBName))
+	}
+	sb.WriteString(" FROM ")
+	sb.WriteString(d.QuoteIdentifier(relSchema.TableName))
+	sb.WriteString(" WHERE ")
+	sb.WriteString(d.QuoteIdentifier(rel.ForeignKey))
+	sb.WriteString(" IN (")
+	placeholders := make([]string, len(parentIDs))
+	for i := range parentIDs {
+		placeholders[i] = d.Placeholder(i + 1)
+	}
+	sb.WriteString(strings.Join(placeholders, ", "))
+	sb.WriteString(")")
+
+	rows, err := q.ex.QueryContext(q.ctx, sb.String(), parentIDs...)
+	if err != nil {
+		return fmt.Errorf("ego: Include(%q): query: %w", rel.FieldName, err)
+	}
+	defer rows.Close()
+
+	// Find the FK column index in the related schema so we can index by it.
+	fkColIdx := -1
+	for i, col := range relSchema.Columns {
+		if col.DBName == rel.ForeignKey {
+			fkColIdx = i
+			break
+		}
+	}
+	if fkColIdx < 0 {
+		return fmt.Errorf("ego: Include(%q): FK column %q not found in %s schema",
+			rel.FieldName, rel.ForeignKey, relSchema.GoType.Name())
+	}
+
+	// Scan results and index by FK value.
+	// indexed maps parent_id -> *RelatedType (as reflect.Value pointer).
+	indexed := make(map[int64]reflect.Value)
+	for rows.Next() {
+		relEntity := reflect.New(rel.RelatedType) // *RelatedType
+		relEntityElem := relEntity.Elem()          // RelatedType
+		scanDest := make([]any, len(relSchema.Columns))
+		for i, col := range relSchema.Columns {
+			scanDest[i] = relEntityElem.FieldByIndex(col.Index).Addr().Interface()
+		}
+		if err := rows.Scan(scanDest...); err != nil {
+			return fmt.Errorf("ego: Include(%q): scan: %w", rel.FieldName, err)
+		}
+		fkVal := relEntityElem.FieldByIndex(relSchema.Columns[fkColIdx].Index).Int()
+		indexed[fkVal] = relEntity // store as *RelatedType
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("ego: Include(%q): %w", rel.FieldName, err)
+	}
+
+	// Set the pointer field on each parent entity (or leave nil if no match).
+	for i := range results {
+		entityVal := reflect.ValueOf(&results[i]).Elem()
+		parentID := entityVal.FieldByIndex(schema.PrimaryKey.Index).Int()
+		if related, ok := indexed[parentID]; ok {
+			entityVal.FieldByIndex(rel.FieldIndex).Set(related)
+		}
+	}
+
+	return nil
+}
+
+// loadManyToMany implements eager loading for ManyToMany relationships.
+// It queries the pivot table to find associations, then loads the related
+// entities and assigns them to slice fields on each parent.
+func (q *QueryBuilder[T]) loadManyToMany(schema *EntitySchema, rel *RelationshipSchema, results []T) error {
+	if schema.PrimaryKey == nil {
+		return fmt.Errorf("ego: Include: parent entity %s has no primary key", schema.GoType.Name())
+	}
+
+	// Resolve the related entity's schema.
+	relSchema, err := resolveSchemaForType(q.ex, rel.RelatedType)
+	if err != nil {
+		return fmt.Errorf("ego: Include(%q): %w", rel.FieldName, err)
+	}
+	if relSchema.PrimaryKey == nil {
+		return fmt.Errorf("ego: Include(%q): related entity %s has no primary key",
+			rel.FieldName, relSchema.GoType.Name())
+	}
+
+	// Collect parent IDs.
+	parentIDs := make([]any, len(results))
+	for i := range results {
+		entityVal := reflect.ValueOf(&results[i]).Elem()
+		parentIDs[i] = entityVal.FieldByIndex(schema.PrimaryKey.Index).Int()
+	}
+
+	d := q.ex.dialect()
+
+	// Step 1: Query pivot table to get associations.
+	// SELECT self_fk, other_fk FROM pivot_table WHERE self_fk IN (?, ?, ?)
+	var sb strings.Builder
+	sb.WriteString("SELECT ")
+	sb.WriteString(d.QuoteIdentifier(rel.PivotFKSelf))
+	sb.WriteString(", ")
+	sb.WriteString(d.QuoteIdentifier(rel.PivotFKOther))
+	sb.WriteString(" FROM ")
+	sb.WriteString(d.QuoteIdentifier(rel.PivotTable))
+	sb.WriteString(" WHERE ")
+	sb.WriteString(d.QuoteIdentifier(rel.PivotFKSelf))
+	sb.WriteString(" IN (")
+	placeholders := make([]string, len(parentIDs))
+	for i := range parentIDs {
+		placeholders[i] = d.Placeholder(i + 1)
+	}
+	sb.WriteString(strings.Join(placeholders, ", "))
+	sb.WriteString(")")
+
+	pivotRows, err := q.ex.QueryContext(q.ctx, sb.String(), parentIDs...)
+	if err != nil {
+		return fmt.Errorf("ego: Include(%q): pivot query: %w", rel.FieldName, err)
+	}
+	defer pivotRows.Close()
+
+	// Build maps: parent_id -> []related_id, and collect all unique related IDs.
+	pivotMap := make(map[int64][]int64)
+	relatedIDSet := make(map[int64]bool)
+	for pivotRows.Next() {
+		var selfFK, otherFK int64
+		if err := pivotRows.Scan(&selfFK, &otherFK); err != nil {
+			return fmt.Errorf("ego: Include(%q): pivot scan: %w", rel.FieldName, err)
+		}
+		pivotMap[selfFK] = append(pivotMap[selfFK], otherFK)
+		relatedIDSet[otherFK] = true
+	}
+	if err := pivotRows.Err(); err != nil {
+		return fmt.Errorf("ego: Include(%q): pivot: %w", rel.FieldName, err)
+	}
+
+	// If no associations found, set empty slices on all parents and return.
+	sliceType := reflect.SliceOf(rel.RelatedType)
+	if len(relatedIDSet) == 0 {
+		for i := range results {
+			entityVal := reflect.ValueOf(&results[i]).Elem()
+			entityVal.FieldByIndex(rel.FieldIndex).Set(reflect.MakeSlice(sliceType, 0, 0))
+		}
+		return nil
+	}
+
+	// Step 2: Query the related table for all referenced entities.
+	relatedIDs := make([]any, 0, len(relatedIDSet))
+	for id := range relatedIDSet {
+		relatedIDs = append(relatedIDs, id)
+	}
+
+	var sb2 strings.Builder
+	sb2.WriteString("SELECT ")
+	for i, col := range relSchema.Columns {
+		if i > 0 {
+			sb2.WriteString(", ")
+		}
+		sb2.WriteString(d.QuoteIdentifier(col.DBName))
+	}
+	sb2.WriteString(" FROM ")
+	sb2.WriteString(d.QuoteIdentifier(relSchema.TableName))
+	sb2.WriteString(" WHERE ")
+	sb2.WriteString(d.QuoteIdentifier(relSchema.PrimaryKey.DBName))
+	sb2.WriteString(" IN (")
+	placeholders2 := make([]string, len(relatedIDs))
+	for i := range relatedIDs {
+		placeholders2[i] = d.Placeholder(i + 1)
+	}
+	sb2.WriteString(strings.Join(placeholders2, ", "))
+	sb2.WriteString(")")
+
+	relRows, err := q.ex.QueryContext(q.ctx, sb2.String(), relatedIDs...)
+	if err != nil {
+		return fmt.Errorf("ego: Include(%q): related query: %w", rel.FieldName, err)
+	}
+	defer relRows.Close()
+
+	// Index related entities by their PK.
+	indexed := make(map[int64]reflect.Value)
+	for relRows.Next() {
+		relEntity := reflect.New(rel.RelatedType).Elem()
+		scanDest := make([]any, len(relSchema.Columns))
+		for i, col := range relSchema.Columns {
+			scanDest[i] = relEntity.FieldByIndex(col.Index).Addr().Interface()
+		}
+		if err := relRows.Scan(scanDest...); err != nil {
+			return fmt.Errorf("ego: Include(%q): related scan: %w", rel.FieldName, err)
+		}
+		pkVal := relEntity.FieldByIndex(relSchema.PrimaryKey.Index).Int()
+		indexed[pkVal] = relEntity
+	}
+	if err := relRows.Err(); err != nil {
+		return fmt.Errorf("ego: Include(%q): related: %w", rel.FieldName, err)
+	}
+
+	// Step 3: Build slices for each parent and set the field.
+	for i := range results {
+		entityVal := reflect.ValueOf(&results[i]).Elem()
+		parentID := entityVal.FieldByIndex(schema.PrimaryKey.Index).Int()
+		relatedPKs := pivotMap[parentID]
+
+		var children []reflect.Value
+		for _, pk := range relatedPKs {
+			if child, ok := indexed[pk]; ok {
+				children = append(children, child)
+			}
+		}
+
+		slice := reflect.MakeSlice(sliceType, len(children), len(children))
+		for j, child := range children {
+			slice.Index(j).Set(child)
+		}
+		entityVal.FieldByIndex(rel.FieldIndex).Set(slice)
 	}
 
 	return nil
