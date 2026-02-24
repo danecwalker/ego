@@ -10,7 +10,7 @@ import (
 // QueryBuilder provides a fluent API for constructing SELECT queries.
 // It is parameterized by the entity type T.
 type QueryBuilder[T any] struct {
-	db         *DB
+	ex         Executor
 	ctx        context.Context
 	conditions []Condition
 	orders     []OrderClause
@@ -20,9 +20,9 @@ type QueryBuilder[T any] struct {
 }
 
 // Query creates a new QueryBuilder for the entity type T.
-func Query[T any](db *DB, ctx context.Context) *QueryBuilder[T] {
+func Query[T any](ex Executor, ctx context.Context) *QueryBuilder[T] {
 	return &QueryBuilder[T]{
-		db:  db,
+		ex:  ex,
 		ctx: ctx,
 	}
 }
@@ -66,7 +66,7 @@ func (q *QueryBuilder[T]) All() ([]T, error) {
 
 	query, args := q.buildSelect(schema, false)
 
-	rows, err := q.db.sqlDB.QueryContext(q.ctx, query, args...)
+	rows, err := q.ex.QueryContext(q.ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("ego: Query.All: %w", err)
 	}
@@ -106,7 +106,7 @@ func (q *QueryBuilder[T]) First() (*T, error) {
 	query, args := q.buildSelect(schema, false)
 	q.limit = origLimit
 
-	row := q.db.sqlDB.QueryRowContext(q.ctx, query, args...)
+	row := q.ex.QueryRowContext(q.ctx, query, args...)
 
 	entity := new(T)
 	entityVal := reflect.ValueOf(entity).Elem()
@@ -136,7 +136,7 @@ func (q *QueryBuilder[T]) Count() (int64, error) {
 	query, args := q.buildSelect(schema, true)
 
 	var count int64
-	err = q.db.sqlDB.QueryRowContext(q.ctx, query, args...).Scan(&count)
+	err = q.ex.QueryRowContext(q.ctx, query, args...).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("ego: Query.Count: %w", err)
 	}
@@ -147,11 +147,11 @@ func (q *QueryBuilder[T]) Count() (int64, error) {
 // resolveSchema looks up or auto-registers the schema for type T.
 func (q *QueryBuilder[T]) resolveSchema() (*EntitySchema, error) {
 	t := reflect.TypeOf((*T)(nil)).Elem()
-	schema, exists := q.db.schemas[t]
-	if !exists {
+	schema := q.ex.schemaFor(t)
+	if schema == nil {
 		entity := new(T)
 		var err error
-		schema, err = parseAndRegister(q.db, entity)
+		schema, err = parseAndRegister(q.ex, entity)
 		if err != nil {
 			return nil, fmt.Errorf("ego: Query: %w", err)
 		}
@@ -166,6 +166,8 @@ func (q *QueryBuilder[T]) buildSelect(schema *EntitySchema, countOnly bool) (str
 	var args []any
 	placeholderIdx := 1
 
+	d := q.ex.dialect()
+
 	// SELECT clause
 	if countOnly {
 		sb.WriteString("SELECT COUNT(*) FROM ")
@@ -175,12 +177,12 @@ func (q *QueryBuilder[T]) buildSelect(schema *EntitySchema, countOnly bool) (str
 			if i > 0 {
 				sb.WriteString(", ")
 			}
-			sb.WriteString(q.db.dialect.QuoteIdentifier(col.DBName))
+			sb.WriteString(d.QuoteIdentifier(col.DBName))
 		}
 		sb.WriteString(" FROM ")
 	}
 
-	sb.WriteString(q.db.dialect.QuoteIdentifier(schema.TableName))
+	sb.WriteString(d.QuoteIdentifier(schema.TableName))
 
 	// WHERE clause
 	if len(q.conditions) > 0 {
@@ -189,11 +191,11 @@ func (q *QueryBuilder[T]) buildSelect(schema *EntitySchema, countOnly bool) (str
 			if i > 0 {
 				sb.WriteString(" AND ")
 			}
-			sb.WriteString(q.db.dialect.QuoteIdentifier(cond.Column))
+			sb.WriteString(d.QuoteIdentifier(cond.Column))
 			sb.WriteString(" ")
 			sb.WriteString(cond.Op)
 			sb.WriteString(" ")
-			sb.WriteString(q.db.dialect.Placeholder(placeholderIdx))
+			sb.WriteString(d.Placeholder(placeholderIdx))
 			args = append(args, cond.Value)
 			placeholderIdx++
 		}
@@ -206,7 +208,7 @@ func (q *QueryBuilder[T]) buildSelect(schema *EntitySchema, countOnly bool) (str
 			if i > 0 {
 				sb.WriteString(", ")
 			}
-			sb.WriteString(q.db.dialect.QuoteIdentifier(order.Column))
+			sb.WriteString(d.QuoteIdentifier(order.Column))
 			sb.WriteString(" ")
 			sb.WriteString(order.Dir)
 		}

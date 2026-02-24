@@ -16,7 +16,7 @@ func AutoMigrate(db *DB, entities ...any) error {
 			return fmt.Errorf("ego: AutoMigrate: %w", err)
 		}
 
-		ddl := generateCreateTable(db.dialect, schema)
+		ddl := generateCreateTable(db.dial, schema)
 		if _, err := db.sqlDB.Exec(ddl); err != nil {
 			return fmt.Errorf("ego: AutoMigrate: failed to create table %q: %w", schema.TableName, err)
 		}
@@ -25,16 +25,17 @@ func AutoMigrate(db *DB, entities ...any) error {
 }
 
 // parseAndRegister parses the schema from an entity value (calling Configure
-// if implemented) and registers it on the DB. If already registered, the
-// existing schema is returned.
-func parseAndRegister(db *DB, entity any) (*EntitySchema, error) {
+// if implemented) and registers it on the Executor. If already registered, the
+// existing schema is returned. Both *DB and *Tx satisfy Executor, so this
+// function works transparently for both.
+func parseAndRegister(ex Executor, entity any) (*EntitySchema, error) {
 	t := reflect.TypeOf(entity)
 	if t.Kind() == reflect.Ptr {
 		t = t.Elem()
 	}
 
 	// Return existing schema if already registered.
-	if schema, exists := db.schemas[t]; exists {
+	if schema := ex.schemaFor(t); schema != nil {
 		return schema, nil
 	}
 
@@ -44,7 +45,7 @@ func parseAndRegister(db *DB, entity any) (*EntitySchema, error) {
 		return nil, err
 	}
 
-	db.schemas[t] = schema
+	ex.registerSchema(t, schema)
 	return schema, nil
 }
 

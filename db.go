@@ -1,6 +1,7 @@
 package ego
 
 import (
+	"context"
 	"database/sql"
 	"reflect"
 )
@@ -15,7 +16,7 @@ type DriverConfig struct {
 // DB wraps a *sql.DB with ego metadata (dialect, schema registry).
 type DB struct {
 	sqlDB   *sql.DB
-	dialect Dialect
+	dial    Dialect
 	schemas map[reflect.Type]*EntitySchema
 }
 
@@ -56,7 +57,7 @@ func Open(cfg DriverConfig, opts ...Option) (*DB, error) {
 
 	return &DB{
 		sqlDB:   sqlDB,
-		dialect: cfg.Dialect,
+		dial:    cfg.Dialect,
 		schemas: make(map[reflect.Type]*EntitySchema),
 	}, nil
 }
@@ -73,8 +74,28 @@ func (db *DB) SqlDB() *sql.DB {
 
 // Dialect returns the dialect associated with this database.
 func (db *DB) Dialect() Dialect {
-	return db.dialect
+	return db.dial
 }
+
+// Executor interface methods — these allow *DB to satisfy Executor.
+
+func (db *DB) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	return db.sqlDB.ExecContext(ctx, query, args...)
+}
+
+func (db *DB) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	return db.sqlDB.QueryContext(ctx, query, args...)
+}
+
+func (db *DB) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
+	return db.sqlDB.QueryRowContext(ctx, query, args...)
+}
+
+func (db *DB) dialect() Dialect { return db.dial }
+
+func (db *DB) schemaFor(t reflect.Type) *EntitySchema { return db.schemas[t] }
+
+func (db *DB) registerSchema(t reflect.Type, s *EntitySchema) { db.schemas[t] = s }
 
 // TableExists checks whether the given table name exists in the database.
 // The check is dialect-aware; for SQLite it queries sqlite_master.
@@ -82,7 +103,7 @@ func (db *DB) TableExists(tableName string) bool {
 	var name string
 	var err error
 
-	switch db.dialect.Name() {
+	switch db.dial.Name() {
 	case "sqlite":
 		err = db.sqlDB.QueryRow(
 			"SELECT name FROM sqlite_master WHERE type='table' AND name=?",
@@ -104,9 +125,9 @@ func (db *DB) TableExists(tableName string) bool {
 func (db *DB) ColumnNames(tableName string) []string {
 	var cols []string
 
-	switch db.dialect.Name() {
+	switch db.dial.Name() {
 	case "sqlite":
-		rows, err := db.sqlDB.Query("PRAGMA table_info(" + db.dialect.QuoteIdentifier(tableName) + ")")
+		rows, err := db.sqlDB.Query("PRAGMA table_info(" + db.dial.QuoteIdentifier(tableName) + ")")
 		if err != nil {
 			return nil
 		}
