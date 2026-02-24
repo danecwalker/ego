@@ -28,6 +28,13 @@ func Create[T any](ex Executor, ctx context.Context, entity *T) error {
 		}
 	}
 
+	// Run BeforeCreate hook if the entity implements it.
+	if hook, ok := any(entity).(BeforeCreator); ok {
+		if err := hook.BeforeCreate(ctx); err != nil {
+			return fmt.Errorf("ego: Create: BeforeCreate hook: %w", err)
+		}
+	}
+
 	entityVal := reflect.ValueOf(entity).Elem()
 	now := time.Now()
 
@@ -82,6 +89,13 @@ func Create[T any](ex Executor, ctx context.Context, entity *T) error {
 		entityVal.FieldByIndex(schema.PrimaryKey.Index).SetInt(lastID)
 	}
 
+	// Run AfterCreate hook if the entity implements it.
+	if hook, ok := any(entity).(AfterCreator); ok {
+		if err := hook.AfterCreate(ctx); err != nil {
+			return fmt.Errorf("ego: Create: AfterCreate hook: %w", err)
+		}
+	}
+
 	return nil
 }
 
@@ -114,6 +128,13 @@ func Update[T any](ex Executor, ctx context.Context, entity *T) error {
 	pkVal := entityVal.FieldByIndex(schema.PrimaryKey.Index).Int()
 	if pkVal == 0 {
 		return fmt.Errorf("ego: Update: primary key is zero")
+	}
+
+	// Run BeforeUpdate hook if the entity implements it.
+	if hook, ok := any(entity).(BeforeUpdater); ok {
+		if err := hook.BeforeUpdate(ctx); err != nil {
+			return fmt.Errorf("ego: Update: BeforeUpdate hook: %w", err)
+		}
 	}
 
 	// Set UpdatedAt to now if the entity has that field.
@@ -156,6 +177,13 @@ func Update[T any](ex Executor, ctx context.Context, entity *T) error {
 		return fmt.Errorf("ego: Update: %w", err)
 	}
 
+	// Run AfterUpdate hook if the entity implements it.
+	if hook, ok := any(entity).(AfterUpdater); ok {
+		if err := hook.AfterUpdate(ctx); err != nil {
+			return fmt.Errorf("ego: Update: AfterUpdate hook: %w", err)
+		}
+	}
+
 	return nil
 }
 
@@ -188,6 +216,13 @@ func Delete[T any](ex Executor, ctx context.Context, entity *T) error {
 		return fmt.Errorf("ego: Delete: primary key is zero")
 	}
 
+	// Run BeforeDelete hook if the entity implements it.
+	if hook, ok := any(entity).(BeforeDeleter); ok {
+		if err := hook.BeforeDelete(ctx); err != nil {
+			return fmt.Errorf("ego: Delete: BeforeDelete hook: %w", err)
+		}
+	}
+
 	d := ex.dialect()
 
 	query := fmt.Sprintf("DELETE FROM %s WHERE %s = %s",
@@ -198,6 +233,13 @@ func Delete[T any](ex Executor, ctx context.Context, entity *T) error {
 
 	if _, err := ex.ExecContext(ctx, query, pkVal); err != nil {
 		return fmt.Errorf("ego: Delete: %w", err)
+	}
+
+	// Run AfterDelete hook if the entity implements it.
+	if hook, ok := any(entity).(AfterDeleter); ok {
+		if err := hook.AfterDelete(ctx); err != nil {
+			return fmt.Errorf("ego: Delete: AfterDelete hook: %w", err)
+		}
 	}
 
 	return nil
