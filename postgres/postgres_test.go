@@ -4,7 +4,7 @@ package postgres_test
 import (
 	"testing"
 
-	"github.com/danewilson/ego/postgres"
+	"github.com/danecwalker/ego/postgres"
 )
 
 func TestPostgresPlaceholder(t *testing.T) {

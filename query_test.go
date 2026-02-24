@@ -5,7 +5,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/danewilson/ego"
+	"github.com/danecwalker/ego"
 )
 
 func seedUsers(t *testing.T, db *ego.DB) {

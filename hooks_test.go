@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/danewilson/ego"
+	"github.com/danecwalker/ego"
 )
 
 type HookedEntity struct {

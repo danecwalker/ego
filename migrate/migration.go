@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/danewilson/ego"
+	"github.com/danecwalker/ego"
 )
 
 // Direction indicates whether to apply or rollback migrations.

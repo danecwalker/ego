@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/danewilson/ego"
-	"github.com/danewilson/ego/sqlite"
+	"github.com/danecwalker/ego"
+	"github.com/danecwalker/ego/sqlite"
 )
 
 func setupTestDB(t *testing.T, entities ...any) *ego.DB {

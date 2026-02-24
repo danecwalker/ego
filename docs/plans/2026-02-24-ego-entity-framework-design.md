@@ -1,7 +1,7 @@
 # ego — Entity Framework for Go
 
 **Date**: 2026-02-24
-**Module**: `github.com/danewilson/ego`
+**Module**: `github.com/danecwalker/ego`
 **Status**: Design approved
 
 ## Overview

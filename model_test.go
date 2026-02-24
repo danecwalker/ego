@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/danewilson/ego"
+	"github.com/danecwalker/ego"
 )
 
 func TestModelHasRequiredFields(t *testing.T) {

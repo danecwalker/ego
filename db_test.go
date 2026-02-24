@@ -3,8 +3,8 @@ package ego_test
 import (
 	"testing"
 
-	"github.com/danewilson/ego"
-	"github.com/danewilson/ego/sqlite"
+	"github.com/danecwalker/ego"
+	"github.com/danecwalker/ego/sqlite"
 )
 
 func TestOpenWithSQLite(t *testing.T) {

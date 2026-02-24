@@ -4,7 +4,7 @@ package ego_test
 import (
 	"testing"
 
-	"github.com/danewilson/ego"
+	"github.com/danecwalker/ego"
 )
 
 type SimpleEntity struct {

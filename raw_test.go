@@ -5,7 +5,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/danewilson/ego"
+	"github.com/danecwalker/ego"
 )
 
 func TestRawQueryScanResults(t *testing.T) {

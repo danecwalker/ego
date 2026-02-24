@@ -1,4 +1,4 @@
-module github.com/danewilson/ego
+module github.com/danecwalker/ego
 
 go 1.25.5
 

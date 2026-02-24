@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/danewilson/ego"
+	"github.com/danecwalker/ego"
 )
 
 type postgresDialect struct{}

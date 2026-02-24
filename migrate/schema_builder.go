@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/danewilson/ego"
+	"github.com/danecwalker/ego"
 )
 
 // Schema collects DDL statements to be executed during a migration.

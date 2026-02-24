@@ -4,7 +4,7 @@ package ego_test
 import (
 	"testing"
 
-	"github.com/danewilson/ego"
+	"github.com/danecwalker/ego"
 )
 
 // mockDialect verifies the interface is implementable

@@ -6,7 +6,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/danewilson/ego"
+	"github.com/danecwalker/ego"
 )
 
 func TestTransactionCommitsOnSuccess(t *testing.T) {

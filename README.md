@@ -2,8 +2,8 @@
 
 **Entity GO** -- A type-safe, code-first ORM for Go.
 
-[![CI](https://github.com/danewilson/ego/actions/workflows/ci.yml/badge.svg)](https://github.com/danewilson/ego/actions/workflows/ci.yml)
-[![Go Reference](https://pkg.go.dev/badge/github.com/danewilson/ego.svg)](https://pkg.go.dev/github.com/danewilson/ego)
+[![CI](https://github.com/danecwalker/ego/actions/workflows/ci.yml/badge.svg)](https://github.com/danecwalker/ego/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/danecwalker/ego.svg)](https://pkg.go.dev/github.com/danecwalker/ego)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 ## Features
@@ -24,7 +24,7 @@
 ## Install
 
 ```bash
-go get github.com/danewilson/ego
+go get github.com/danecwalker/ego
 ```
 
 ## Quick Start
@@ -37,8 +37,8 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/danewilson/ego"
-	"github.com/danewilson/ego/sqlite"
+	"github.com/danecwalker/ego"
+	"github.com/danecwalker/ego/sqlite"
 )
 
 type User struct {
@@ -368,8 +368,8 @@ Swap the import to switch from SQLite to PostgreSQL:
 
 ```go
 import (
-	"github.com/danewilson/ego"
-	"github.com/danewilson/ego/postgres"
+	"github.com/danecwalker/ego"
+	"github.com/danecwalker/ego/postgres"
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 

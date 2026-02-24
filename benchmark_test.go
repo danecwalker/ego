@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/danewilson/ego"
-	"github.com/danewilson/ego/sqlite"
+	"github.com/danecwalker/ego"
+	"github.com/danecwalker/ego/sqlite"
 )
 
 // setupBenchDB creates an in-memory SQLite database for benchmarks,

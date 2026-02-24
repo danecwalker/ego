@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/danewilson/ego"
+	"github.com/danecwalker/ego"
 )
 
 func TestMiddlewareExecutesOnCreate(t *testing.T) {

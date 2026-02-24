@@ -19,7 +19,7 @@
 
 **Step 1: Initialize Go module**
 
-Run: `go mod init github.com/danewilson/ego`
+Run: `go mod init github.com/danecwalker/ego`
 
 **Step 2: Write test for Model base type**
 
@@ -31,7 +31,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/danewilson/ego"
+	"github.com/danecwalker/ego"
 )
 
 func TestModelHasRequiredFields(t *testing.T) {
@@ -110,7 +110,7 @@ package ego_test
 import (
 	"testing"
 
-	"github.com/danewilson/ego"
+	"github.com/danecwalker/ego"
 )
 
 // mockDialect verifies the interface is implementable
@@ -200,7 +200,7 @@ package ego_test
 import (
 	"testing"
 
-	"github.com/danewilson/ego"
+	"github.com/danecwalker/ego"
 )
 
 type SimpleEntity struct {
@@ -374,7 +374,7 @@ package ego_test
 import (
 	"testing"
 
-	"github.com/danewilson/ego"
+	"github.com/danecwalker/ego"
 )
 
 type UserEntity struct {
@@ -535,8 +535,8 @@ package ego_test
 import (
 	"testing"
 
-	"github.com/danewilson/ego"
-	"github.com/danewilson/ego/sqlite"
+	"github.com/danecwalker/ego"
+	"github.com/danecwalker/ego/sqlite"
 )
 
 func TestOpenWithSQLite(t *testing.T) {
@@ -628,8 +628,8 @@ package ego_test
 import (
 	"testing"
 
-	"github.com/danewilson/ego"
-	"github.com/danewilson/ego/sqlite"
+	"github.com/danecwalker/ego"
+	"github.com/danecwalker/ego/sqlite"
 )
 
 func TestRegisterEntity(t *testing.T) {
@@ -706,8 +706,8 @@ package ego_test
 import (
 	"testing"
 
-	"github.com/danewilson/ego"
-	"github.com/danewilson/ego/sqlite"
+	"github.com/danecwalker/ego"
+	"github.com/danecwalker/ego/sqlite"
 )
 
 func TestAutoMigrateCreatesTable(t *testing.T) {
@@ -804,8 +804,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/danewilson/ego"
-	"github.com/danewilson/ego/sqlite"
+	"github.com/danecwalker/ego"
+	"github.com/danecwalker/ego/sqlite"
 )
 
 func setupTestDB(t *testing.T, entities ...any) *ego.DB {
@@ -908,8 +908,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/danewilson/ego"
-	"github.com/danewilson/ego/sqlite"
+	"github.com/danecwalker/ego"
+	"github.com/danecwalker/ego/sqlite"
 )
 
 func seedUsers(t *testing.T, db *ego.DB) {
@@ -1240,8 +1240,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/danewilson/ego"
-	"github.com/danewilson/ego/sqlite"
+	"github.com/danecwalker/ego"
+	"github.com/danecwalker/ego/sqlite"
 )
 
 func TestDBImplementsExecutor(t *testing.T) {
@@ -1288,7 +1288,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/danewilson/ego"
+	"github.com/danecwalker/ego"
 )
 
 func TestTransactionCommitsOnSuccess(t *testing.T) {
@@ -1373,7 +1373,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/danewilson/ego"
+	"github.com/danecwalker/ego"
 )
 
 type HookedEntity struct {
@@ -1516,7 +1516,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/danewilson/ego"
+	"github.com/danecwalker/ego"
 )
 
 func TestMiddlewareExecutesOnCreate(t *testing.T) {
@@ -1623,7 +1623,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/danewilson/ego"
+	"github.com/danecwalker/ego"
 )
 
 type Author struct {
@@ -1833,7 +1833,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/danewilson/ego"
+	"github.com/danecwalker/ego"
 )
 
 func TestRawQueryScanResults(t *testing.T) {
@@ -1893,9 +1893,9 @@ package migrate_test
 import (
 	"testing"
 
-	"github.com/danewilson/ego"
-	"github.com/danewilson/ego/migrate"
-	"github.com/danewilson/ego/sqlite"
+	"github.com/danecwalker/ego"
+	"github.com/danecwalker/ego/migrate"
+	"github.com/danecwalker/ego/sqlite"
 )
 
 type CreateUsersTable struct{}
@@ -1982,7 +1982,7 @@ package postgres_test
 import (
 	"testing"
 
-	"github.com/danewilson/ego/postgres"
+	"github.com/danecwalker/ego/postgres"
 )
 
 func TestPostgresPlaceholder(t *testing.T) {
@@ -2053,7 +2053,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/danewilson/ego"
+	"github.com/danecwalker/ego"
 )
 
 func TestFullCRUDWorkflow(t *testing.T) {

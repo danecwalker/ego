@@ -318,8 +318,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/danewilson/ego"
-	"github.com/danewilson/ego/sqlite"
+	"github.com/danecwalker/ego"
+	"github.com/danecwalker/ego/sqlite"
 )
 
 // setupBenchDB creates an in-memory SQLite DB for benchmarks.
@@ -559,7 +559,7 @@ git commit -m "test: add comprehensive benchmark suite"
 Structure:
 1. **Header:** `# ego` with tagline "Entity GO — A type-safe, code-first ORM for Go" and badges (Go Reference, CI, License)
 2. **Features:** Bullet list of key features (no struct tags, generics, type-safe queries, all relationship types, transactions, hooks, middleware, raw SQL, migrations, SQLite + PostgreSQL)
-3. **Install:** `go get github.com/danewilson/ego`
+3. **Install:** `go get github.com/danecwalker/ego`
 4. **Quick Start:** Complete working example showing: define entity with `ego.Model` embedding + `Configure` method, open SQLite DB, AutoMigrate, Create, Query with Where, Update, Delete
 5. **Defining Entities:** Show the `Configure(*EntityBuilder[T])` pattern with Property, HasMany, BelongsTo, HasOne, ManyToMany
 6. **Querying:** All, First, Where, OrderBy, Limit, Offset, Count
@@ -583,7 +583,7 @@ Structure:
 - `ego.Open(sqlite.New(":memory:"))` returns `(*ego.DB, error)`
 - Entities implement `Configure(b *ego.EntityBuilder[T])` — note: method on pointer receiver
 - `ego.Associate(db, ctx, owner, related1, related2)` for M:N pivot inserts
-- Import paths: `github.com/danewilson/ego`, `github.com/danewilson/ego/sqlite`, `github.com/danewilson/ego/postgres`
+- Import paths: `github.com/danecwalker/ego`, `github.com/danecwalker/ego/sqlite`, `github.com/danecwalker/ego/postgres`
 
 **Step 2: Commit**
 
