@@ -75,3 +75,54 @@ func (db *DB) SqlDB() *sql.DB {
 func (db *DB) Dialect() Dialect {
 	return db.dialect
 }
+
+// TableExists checks whether the given table name exists in the database.
+// The check is dialect-aware; for SQLite it queries sqlite_master.
+func (db *DB) TableExists(tableName string) bool {
+	var name string
+	var err error
+
+	switch db.dialect.Name() {
+	case "sqlite":
+		err = db.sqlDB.QueryRow(
+			"SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+			tableName,
+		).Scan(&name)
+	default:
+		// Generic fallback using information_schema (PostgreSQL, MySQL, etc.)
+		err = db.sqlDB.QueryRow(
+			"SELECT table_name FROM information_schema.tables WHERE table_name=?",
+			tableName,
+		).Scan(&name)
+	}
+
+	return err == nil && name == tableName
+}
+
+// ColumnNames returns the column names for the given table, in ordinal order.
+// The implementation is dialect-aware; for SQLite it uses PRAGMA table_info.
+func (db *DB) ColumnNames(tableName string) []string {
+	var cols []string
+
+	switch db.dialect.Name() {
+	case "sqlite":
+		rows, err := db.sqlDB.Query("PRAGMA table_info(" + db.dialect.QuoteIdentifier(tableName) + ")")
+		if err != nil {
+			return nil
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var cid int
+			var name, colType string
+			var notNull, pk int
+			var dfltValue *string
+			if err := rows.Scan(&cid, &name, &colType, &notNull, &dfltValue, &pk); err != nil {
+				return nil
+			}
+			cols = append(cols, name)
+		}
+	}
+
+	return cols
+}

@@ -2,6 +2,7 @@ package ego
 
 import (
 	"reflect"
+	"unsafe"
 )
 
 // EntityBuilder provides a fluent API for configuring an entity's schema.
@@ -98,4 +99,51 @@ func BuildSchema[T any](entity *T) *EntitySchema {
 	}
 
 	return schema
+}
+
+// buildSchemaAny is a non-generic variant of BuildSchema that accepts any.
+// It is used by AutoMigrate which receives entities as []any.
+// It uses unsafe to set unexported fields on the reflectively-created EntityBuilder.
+func buildSchemaAny(entity any) (*EntitySchema, error) {
+	schema, err := ParseSchema(entity)
+	if err != nil {
+		return nil, err
+	}
+
+	entityVal := reflect.ValueOf(entity)
+	configureMethod := entityVal.MethodByName("Configure")
+	if !configureMethod.IsValid() {
+		return schema, nil
+	}
+
+	// The Configure method expects an *EntityBuilder[T].
+	// Determine the concrete builder type from the method signature.
+	methodType := configureMethod.Type()
+	if methodType.NumIn() != 1 {
+		return schema, nil
+	}
+	builderPtrType := methodType.In(0) // *EntityBuilder[T]
+	if builderPtrType.Kind() != reflect.Ptr {
+		return schema, nil
+	}
+	builderType := builderPtrType.Elem() // EntityBuilder[T]
+
+	// Allocate a new EntityBuilder[T] via reflection.
+	builderPtr := reflect.New(builderType) // *EntityBuilder[T]
+	builderElem := builderPtr.Elem()       // EntityBuilder[T]
+
+	// Set the unexported 'schema' field using unsafe.
+	schemaField := builderElem.Field(0) // first field: schema *EntitySchema
+	schemaFieldPtr := unsafe.Pointer(schemaField.UnsafeAddr())
+	*(*unsafe.Pointer)(schemaFieldPtr) = unsafe.Pointer(schema)
+
+	// Set the unexported 'zero' field using unsafe.
+	// 'zero' is the second field and is a *T, which is the same type as entity.
+	zeroField := builderElem.Field(1) // second field: zero *T
+	zeroFieldPtr := unsafe.Pointer(zeroField.UnsafeAddr())
+	*(*unsafe.Pointer)(zeroFieldPtr) = unsafe.Pointer(entityVal.Pointer())
+
+	configureMethod.Call([]reflect.Value{builderPtr})
+
+	return schema, nil
 }
