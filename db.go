@@ -15,9 +15,10 @@ type DriverConfig struct {
 
 // DB wraps a *sql.DB with ego metadata (dialect, schema registry).
 type DB struct {
-	sqlDB   *sql.DB
-	dial    Dialect
-	schemas map[reflect.Type]*EntitySchema
+	sqlDB       *sql.DB
+	dial        Dialect
+	schemas     map[reflect.Type]*EntitySchema
+	middlewares []MiddlewareFunc
 }
 
 // Open creates a new DB connection using the provided driver configuration.
@@ -96,6 +97,15 @@ func (db *DB) dialect() Dialect { return db.dial }
 func (db *DB) schemaFor(t reflect.Type) *EntitySchema { return db.schemas[t] }
 
 func (db *DB) registerSchema(t reflect.Type, s *EntitySchema) { db.schemas[t] = s }
+
+func (db *DB) getMiddlewares() []MiddlewareFunc { return db.middlewares }
+
+// Use registers a middleware that will be executed on Create, Update, and
+// Delete operations. Middlewares are called in the order they are registered
+// (first registered = outermost wrapper, runs first).
+func (db *DB) Use(m MiddlewareFunc) {
+	db.middlewares = append(db.middlewares, m)
+}
 
 // TableExists checks whether the given table name exists in the database.
 // The check is dialect-aware; for SQLite it queries sqlite_master.

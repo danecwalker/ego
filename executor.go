@@ -20,4 +20,5 @@ type Executor interface {
 	dialect() Dialect
 	schemaFor(t reflect.Type) *EntitySchema
 	registerSchema(t reflect.Type, s *EntitySchema)
+	getMiddlewares() []MiddlewareFunc
 }

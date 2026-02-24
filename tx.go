@@ -37,6 +37,8 @@ func (tx *Tx) schemaFor(t reflect.Type) *EntitySchema { return tx.schemas[t] }
 
 func (tx *Tx) registerSchema(t reflect.Type, s *EntitySchema) { tx.schemas[t] = s }
 
+func (tx *Tx) getMiddlewares() []MiddlewareFunc { return nil }
+
 // Transaction starts a database transaction and calls fn with the new Tx.
 // If fn returns nil, the transaction is committed. If fn returns an error,
 // the transaction is rolled back and the error is returned. If fn panics,

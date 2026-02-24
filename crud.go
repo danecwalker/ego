@@ -74,19 +74,30 @@ func Create[T any](ex Executor, ctx context.Context, entity *T) error {
 		strings.Join(placeholders, ", "),
 	)
 
-	// Execute the INSERT.
-	result, err := ex.ExecContext(ctx, query, args...)
-	if err != nil {
-		return fmt.Errorf("ego: Create: %w", err)
+	// Build the actual executor (the innermost handler).
+	execute := func(op *Operation) error {
+		result, err := ex.ExecContext(ctx, op.SQL, op.Args...)
+		if err != nil {
+			return err
+		}
+		// Set the ID back on the entity using LastInsertId.
+		if schema.PrimaryKey != nil {
+			lastID, err := result.LastInsertId()
+			if err != nil {
+				return fmt.Errorf("failed to get last insert id: %w", err)
+			}
+			entityVal.FieldByIndex(schema.PrimaryKey.Index).SetInt(lastID)
+		}
+		return nil
 	}
 
-	// Set the ID back on the entity using LastInsertId.
-	if schema.PrimaryKey != nil {
-		lastID, err := result.LastInsertId()
-		if err != nil {
-			return fmt.Errorf("ego: Create: failed to get last insert id: %w", err)
-		}
-		entityVal.FieldByIndex(schema.PrimaryKey.Index).SetInt(lastID)
+	// Build the middleware chain (reverse order so first-registered is outermost).
+	handler := buildMiddlewareChain(ex.getMiddlewares(), execute)
+
+	// Execute through the chain.
+	op := &Operation{Type: "create", Entity: entity, SQL: query, Args: args}
+	if err := handler(op); err != nil {
+		return fmt.Errorf("ego: Create: %w", err)
 	}
 
 	// Run AfterCreate hook if the entity implements it.
@@ -173,7 +184,18 @@ func Update[T any](ex Executor, ctx context.Context, entity *T) error {
 		d.Placeholder(placeholderIdx),
 	)
 
-	if _, err := ex.ExecContext(ctx, query, args...); err != nil {
+	// Build the actual executor (the innermost handler).
+	execute := func(op *Operation) error {
+		_, err := ex.ExecContext(ctx, op.SQL, op.Args...)
+		return err
+	}
+
+	// Build the middleware chain.
+	handler := buildMiddlewareChain(ex.getMiddlewares(), execute)
+
+	// Execute through the chain.
+	op := &Operation{Type: "update", Entity: entity, SQL: query, Args: args}
+	if err := handler(op); err != nil {
 		return fmt.Errorf("ego: Update: %w", err)
 	}
 
@@ -231,7 +253,20 @@ func Delete[T any](ex Executor, ctx context.Context, entity *T) error {
 		d.Placeholder(1),
 	)
 
-	if _, err := ex.ExecContext(ctx, query, pkVal); err != nil {
+	args := []any{pkVal}
+
+	// Build the actual executor (the innermost handler).
+	execute := func(op *Operation) error {
+		_, err := ex.ExecContext(ctx, op.SQL, op.Args...)
+		return err
+	}
+
+	// Build the middleware chain.
+	handler := buildMiddlewareChain(ex.getMiddlewares(), execute)
+
+	// Execute through the chain.
+	op := &Operation{Type: "delete", Entity: entity, SQL: query, Args: args}
+	if err := handler(op); err != nil {
 		return fmt.Errorf("ego: Delete: %w", err)
 	}
 
