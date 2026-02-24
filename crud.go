@@ -38,14 +38,21 @@ func Create[T any](ex Executor, ctx context.Context, entity *T) error {
 	entityVal := reflect.ValueOf(entity).Elem()
 	now := time.Now()
 
-	// Set CreatedAt and UpdatedAt timestamps if the entity has those fields.
+	// Set CreatedAt and UpdatedAt timestamps if the entity has those fields
+	// and they haven't already been set (e.g., by a BeforeCreate hook).
+	zeroTime := time.Time{}
 	for _, col := range schema.Columns {
-		if col.GoType == reflect.TypeOf(time.Time{}) {
+		if col.GoType == reflect.TypeOf(zeroTime) {
+			field := entityVal.FieldByIndex(col.Index)
 			switch col.DBName {
 			case "created_at":
-				entityVal.FieldByIndex(col.Index).Set(reflect.ValueOf(now))
+				if field.Interface().(time.Time).IsZero() {
+					field.Set(reflect.ValueOf(now))
+				}
 			case "updated_at":
-				entityVal.FieldByIndex(col.Index).Set(reflect.ValueOf(now))
+				if field.Interface().(time.Time).IsZero() {
+					field.Set(reflect.ValueOf(now))
+				}
 			}
 		}
 	}
@@ -74,13 +81,28 @@ func Create[T any](ex Executor, ctx context.Context, entity *T) error {
 		strings.Join(placeholders, ", "),
 	)
 
+	// For dialects that support RETURNING (e.g. PostgreSQL), append RETURNING id
+	// and use QueryRowContext instead of ExecContext + LastInsertId.
+	useReturning := schema.PrimaryKey != nil && d.SupportsReturning()
+	if useReturning {
+		query += " RETURNING " + d.QuoteIdentifier(schema.PrimaryKey.DBName)
+	}
+
 	// Build the actual executor (the innermost handler).
 	execute := func(op *Operation) error {
+		if useReturning {
+			var lastID int64
+			if err := ex.QueryRowContext(ctx, op.SQL, op.Args...).Scan(&lastID); err != nil {
+				return err
+			}
+			entityVal.FieldByIndex(schema.PrimaryKey.Index).SetInt(lastID)
+			return nil
+		}
+
 		result, err := ex.ExecContext(ctx, op.SQL, op.Args...)
 		if err != nil {
 			return err
 		}
-		// Set the ID back on the entity using LastInsertId.
 		if schema.PrimaryKey != nil {
 			lastID, err := result.LastInsertId()
 			if err != nil {

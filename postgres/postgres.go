@@ -7,6 +7,7 @@ package postgres
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/danewilson/ego"
 )
@@ -20,7 +21,7 @@ func (d *postgresDialect) Placeholder(index int) string {
 }
 
 func (d *postgresDialect) QuoteIdentifier(name string) string {
-	return `"` + name + `"`
+	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
 }
 
 func (d *postgresDialect) AutoIncrementDef() string {

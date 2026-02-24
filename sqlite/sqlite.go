@@ -1,6 +1,8 @@
 package sqlite
 
 import (
+	"strings"
+
 	"github.com/danewilson/ego"
 	_ "modernc.org/sqlite" // register the sqlite driver
 )
@@ -9,7 +11,9 @@ type sqliteDialect struct{}
 
 func (d *sqliteDialect) Name() string                       { return "sqlite" }
 func (d *sqliteDialect) Placeholder(index int) string       { return "?" }
-func (d *sqliteDialect) QuoteIdentifier(name string) string { return `"` + name + `"` }
+func (d *sqliteDialect) QuoteIdentifier(name string) string {
+	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
+}
 func (d *sqliteDialect) AutoIncrementDef() string           { return "AUTOINCREMENT" }
 func (d *sqliteDialect) SupportsReturning() bool            { return false }
 

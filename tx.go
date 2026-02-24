@@ -6,15 +6,18 @@ import (
 	"database/sql"
 	"fmt"
 	"reflect"
+	"sync"
 )
 
 // Tx wraps a *sql.Tx with ego metadata, implementing the Executor interface.
 // A Tx shares the schema registry with its parent DB so that entity schemas
 // registered outside the transaction are visible inside it, and vice versa.
 type Tx struct {
-	sqlTx   *sql.Tx
-	dial    Dialect
-	schemas map[reflect.Type]*EntitySchema // shared reference with parent DB
+	sqlTx       *sql.Tx
+	dial        Dialect
+	schemas     map[reflect.Type]*EntitySchema // shared reference with parent DB
+	schemasMu   *sync.RWMutex                 // shared mutex with parent DB
+	middlewares []MiddlewareFunc               // inherited from parent DB
 }
 
 // Executor interface methods — these allow *Tx to satisfy Executor.
@@ -33,11 +36,20 @@ func (tx *Tx) QueryRowContext(ctx context.Context, query string, args ...any) *s
 
 func (tx *Tx) dialect() Dialect { return tx.dial }
 
-func (tx *Tx) schemaFor(t reflect.Type) *EntitySchema { return tx.schemas[t] }
+func (tx *Tx) schemaFor(t reflect.Type) *EntitySchema {
+	tx.schemasMu.RLock()
+	s := tx.schemas[t]
+	tx.schemasMu.RUnlock()
+	return s
+}
 
-func (tx *Tx) registerSchema(t reflect.Type, s *EntitySchema) { tx.schemas[t] = s }
+func (tx *Tx) registerSchema(t reflect.Type, s *EntitySchema) {
+	tx.schemasMu.Lock()
+	tx.schemas[t] = s
+	tx.schemasMu.Unlock()
+}
 
-func (tx *Tx) getMiddlewares() []MiddlewareFunc { return nil }
+func (tx *Tx) getMiddlewares() []MiddlewareFunc { return tx.middlewares }
 
 // Transaction starts a database transaction and calls fn with the new Tx.
 // If fn returns nil, the transaction is committed. If fn returns an error,
@@ -50,9 +62,11 @@ func Transaction(db *DB, ctx context.Context, fn func(tx *Tx) error) (err error)
 	}
 
 	tx := &Tx{
-		sqlTx:   sqlTx,
-		dial:    db.dial,
-		schemas: db.schemas, // share the same schema registry
+		sqlTx:       sqlTx,
+		dial:        db.dial,
+		schemas:     db.schemas,       // share the same schema registry
+		schemasMu:   &db.schemasMu,    // share the same mutex
+		middlewares: db.middlewares,    // inherit parent's middlewares
 	}
 
 	defer func() {

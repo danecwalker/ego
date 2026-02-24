@@ -102,9 +102,10 @@ func (b *EntityBuilder[T]) HasMany(fieldPtr any) *RelationshipBuilder {
 		parentName := t.Name()
 		rel.ForeignKey = strings.ToLower(parentName) + "_id"
 		b.schema.Relationships = append(b.schema.Relationships, *rel)
+		return &RelationshipBuilder{rel: &b.schema.Relationships[len(b.schema.Relationships)-1]}
 	}
 
-	return &RelationshipBuilder{rel: &b.schema.Relationships[len(b.schema.Relationships)-1]}
+	return &RelationshipBuilder{rel: &RelationshipSchema{}}
 }
 
 // BelongsTo registers an inverse one-to-many (belongs-to) relationship.
@@ -127,9 +128,10 @@ func (b *EntityBuilder[T]) BelongsTo(fieldPtr any) *RelationshipBuilder {
 		relatedName := rel.RelatedType.Name()
 		rel.ForeignKey = strings.ToLower(relatedName) + "_id"
 		b.schema.Relationships = append(b.schema.Relationships, *rel)
+		return &RelationshipBuilder{rel: &b.schema.Relationships[len(b.schema.Relationships)-1]}
 	}
 
-	return &RelationshipBuilder{rel: &b.schema.Relationships[len(b.schema.Relationships)-1]}
+	return &RelationshipBuilder{rel: &RelationshipSchema{}}
 }
 
 // HasOne registers a one-to-one relationship where the foreign key is on the
@@ -151,9 +153,10 @@ func (b *EntityBuilder[T]) HasOne(fieldPtr any) *RelationshipBuilder {
 		parentName := t.Name()
 		rel.ForeignKey = strings.ToLower(parentName) + "_id"
 		b.schema.Relationships = append(b.schema.Relationships, *rel)
+		return &RelationshipBuilder{rel: &b.schema.Relationships[len(b.schema.Relationships)-1]}
 	}
 
-	return &RelationshipBuilder{rel: &b.schema.Relationships[len(b.schema.Relationships)-1]}
+	return &RelationshipBuilder{rel: &RelationshipSchema{}}
 }
 
 // ManyToMany registers a many-to-many relationship via a pivot table.
@@ -182,9 +185,10 @@ func (b *EntityBuilder[T]) ManyToMany(fieldPtr any) *RelationshipBuilder {
 		rel.PivotFKSelf = ownerName + "_id"
 		rel.PivotFKOther = relatedName + "_id"
 		b.schema.Relationships = append(b.schema.Relationships, *rel)
+		return &RelationshipBuilder{rel: &b.schema.Relationships[len(b.schema.Relationships)-1]}
 	}
 
-	return &RelationshipBuilder{rel: &b.schema.Relationships[len(b.schema.Relationships)-1]}
+	return &RelationshipBuilder{rel: &RelationshipSchema{}}
 }
 
 // findRelField walks a struct type recursively (flattening embedded structs)
@@ -292,6 +296,13 @@ func buildSchemaAny(entity any) (*EntitySchema, error) {
 	// Allocate a new EntityBuilder[T] via reflection.
 	builderPtr := reflect.New(builderType) // *EntityBuilder[T]
 	builderElem := builderPtr.Elem()       // EntityBuilder[T]
+
+	// Validate the field layout matches our expectations before using unsafe.
+	if builderType.NumField() < 2 ||
+		builderType.Field(0).Name != "schema" ||
+		builderType.Field(1).Name != "zero" {
+		return schema, nil // skip Configure if layout is unexpected
+	}
 
 	// Set the unexported 'schema' field using unsafe.
 	schemaField := builderElem.Field(0) // first field: schema *EntitySchema

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"reflect"
+	"sync"
 )
 
 // DriverConfig holds database driver configuration returned by dialect constructors.
@@ -18,6 +19,7 @@ type DB struct {
 	sqlDB       *sql.DB
 	dial        Dialect
 	schemas     map[reflect.Type]*EntitySchema
+	schemasMu   sync.RWMutex
 	middlewares []MiddlewareFunc
 }
 
@@ -94,9 +96,18 @@ func (db *DB) QueryRowContext(ctx context.Context, query string, args ...any) *s
 
 func (db *DB) dialect() Dialect { return db.dial }
 
-func (db *DB) schemaFor(t reflect.Type) *EntitySchema { return db.schemas[t] }
+func (db *DB) schemaFor(t reflect.Type) *EntitySchema {
+	db.schemasMu.RLock()
+	s := db.schemas[t]
+	db.schemasMu.RUnlock()
+	return s
+}
 
-func (db *DB) registerSchema(t reflect.Type, s *EntitySchema) { db.schemas[t] = s }
+func (db *DB) registerSchema(t reflect.Type, s *EntitySchema) {
+	db.schemasMu.Lock()
+	db.schemas[t] = s
+	db.schemasMu.Unlock()
+}
 
 func (db *DB) getMiddlewares() []MiddlewareFunc { return db.middlewares }
 

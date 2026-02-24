@@ -139,10 +139,35 @@ func generateColumnDef(d Dialect, schema *EntitySchema, col *ColumnSchema) strin
 
 	// DEFAULT
 	if col.DefaultValue != nil {
-		parts = append(parts, fmt.Sprintf("DEFAULT %v", col.DefaultValue))
+		parts = append(parts, "DEFAULT "+formatDefaultValue(col.DefaultValue))
 	}
 
 	return strings.Join(parts, " ")
+}
+
+// formatDefaultValue safely formats a default value for DDL. Strings are
+// single-quoted with embedded single quotes escaped; numeric and bool types
+// are formatted directly.
+func formatDefaultValue(v any) string {
+	switch val := v.(type) {
+	case string:
+		escaped := strings.ReplaceAll(val, "'", "''")
+		return "'" + escaped + "'"
+	case int, int8, int16, int32, int64:
+		return fmt.Sprintf("%d", val)
+	case uint, uint8, uint16, uint32, uint64:
+		return fmt.Sprintf("%d", val)
+	case float32, float64:
+		return fmt.Sprintf("%g", val)
+	case bool:
+		if val {
+			return "1"
+		}
+		return "0"
+	default:
+		escaped := strings.ReplaceAll(fmt.Sprintf("%v", val), "'", "''")
+		return "'" + escaped + "'"
+	}
 }
 
 // goTypeString returns a string representation of a Go type suitable for

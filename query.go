@@ -2,6 +2,8 @@ package ego
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -126,7 +128,7 @@ func (q *QueryBuilder[T]) First() (*T, error) {
 	}
 
 	if err := row.Scan(scanDest...); err != nil {
-		if err.Error() == "sql: no rows in result set" {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
 		return nil, fmt.Errorf("ego: Query.First: %w", err)
@@ -178,6 +180,16 @@ func (q *QueryBuilder[T]) resolveSchema() (*EntitySchema, error) {
 	return schema, nil
 }
 
+// validOps is the set of allowed SQL comparison operators.
+var validOps = map[string]bool{
+	"=": true, "!=": true, "<>": true,
+	">": true, "<": true, ">=": true, "<=": true,
+	"LIKE": true, "like": true,
+	"IN": true, "in": true,
+	"IS": true, "is": true,
+	"IS NOT": true, "is not": true,
+}
+
 // buildSelect constructs the SQL SELECT statement and its argument list.
 // If countOnly is true, it builds SELECT COUNT(*) instead of selecting columns.
 func (q *QueryBuilder[T]) buildSelect(schema *EntitySchema, countOnly bool) (string, []any) {
@@ -212,7 +224,11 @@ func (q *QueryBuilder[T]) buildSelect(schema *EntitySchema, countOnly bool) (str
 			}
 			sb.WriteString(d.QuoteIdentifier(cond.Column))
 			sb.WriteString(" ")
-			sb.WriteString(cond.Op)
+			op := cond.Op
+			if !validOps[op] {
+				op = "=" // fallback to safe default for unrecognized operator
+			}
+			sb.WriteString(op)
 			sb.WriteString(" ")
 			sb.WriteString(d.Placeholder(placeholderIdx))
 			args = append(args, cond.Value)
@@ -229,7 +245,11 @@ func (q *QueryBuilder[T]) buildSelect(schema *EntitySchema, countOnly bool) (str
 			}
 			sb.WriteString(d.QuoteIdentifier(order.Column))
 			sb.WriteString(" ")
-			sb.WriteString(order.Dir)
+			dir := order.Dir
+			if dir != "ASC" && dir != "DESC" {
+				dir = "ASC" // fallback to safe default
+			}
+			sb.WriteString(dir)
 		}
 	}
 
