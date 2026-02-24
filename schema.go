@@ -9,10 +9,11 @@ import (
 
 // EntitySchema holds the parsed metadata for an entity struct.
 type EntitySchema struct {
-	TableName  string
-	GoType     reflect.Type
-	Columns    []ColumnSchema
-	PrimaryKey *ColumnSchema
+	TableName     string
+	GoType        reflect.Type
+	Columns       []ColumnSchema
+	PrimaryKey    *ColumnSchema
+	Relationships []RelationshipSchema
 }
 
 // ColumnSchema describes a single database column derived from a struct field.

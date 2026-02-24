@@ -16,7 +16,7 @@ type QueryBuilder[T any] struct {
 	orders     []OrderClause
 	limit      int
 	offset     int
-	includes   []string // reserved for future relationship eager-loading (Task 16)
+	includes   []string // relationship field names to eager-load via Include
 }
 
 // Query creates a new QueryBuilder for the entity type T.
@@ -51,7 +51,10 @@ func (q *QueryBuilder[T]) Offset(n int) *QueryBuilder[T] {
 	return q
 }
 
-// Include marks a relationship for eager loading (reserved for Task 16).
+// Include marks a relationship for eager loading. The relation argument must
+// match a Go field name that was registered via HasMany or BelongsTo in the
+// entity's Configure method. Included relationships are loaded in a second
+// query using an IN clause after the primary entities are fetched.
 func (q *QueryBuilder[T]) Include(relation string) *QueryBuilder[T] {
 	q.includes = append(q.includes, relation)
 	return q
@@ -89,6 +92,13 @@ func (q *QueryBuilder[T]) All() ([]T, error) {
 		return nil, fmt.Errorf("ego: Query.All: %w", err)
 	}
 
+	// Eager-load included relationships.
+	if len(q.includes) > 0 && len(results) > 0 {
+		if err := q.loadIncludes(schema, results); err != nil {
+			return nil, err
+		}
+	}
+
 	return results, nil
 }
 
@@ -120,6 +130,15 @@ func (q *QueryBuilder[T]) First() (*T, error) {
 			return nil, ErrNotFound
 		}
 		return nil, fmt.Errorf("ego: Query.First: %w", err)
+	}
+
+	// Eager-load included relationships.
+	if len(q.includes) > 0 {
+		results := []T{*entity}
+		if err := q.loadIncludes(schema, results); err != nil {
+			return nil, err
+		}
+		*entity = results[0]
 	}
 
 	return entity, nil
@@ -225,4 +244,243 @@ func (q *QueryBuilder[T]) buildSelect(schema *EntitySchema, countOnly bool) (str
 	}
 
 	return sb.String(), args
+}
+
+// loadIncludes processes all eager-load includes for the given results slice.
+// It modifies results in-place by setting relationship fields.
+func (q *QueryBuilder[T]) loadIncludes(schema *EntitySchema, results []T) error {
+	for _, inc := range q.includes {
+		rel := findRelationship(schema, inc)
+		if rel == nil {
+			return fmt.Errorf("ego: Include(%q): no such relationship on %s", inc, schema.GoType.Name())
+		}
+
+		switch rel.Type {
+		case HasManyRel:
+			if err := q.loadHasMany(schema, rel, results); err != nil {
+				return err
+			}
+		case BelongsToRel:
+			if err := q.loadBelongsTo(schema, rel, results); err != nil {
+				return err
+			}
+		default:
+			return fmt.Errorf("ego: Include(%q): unsupported relationship type %d", inc, rel.Type)
+		}
+	}
+	return nil
+}
+
+// findRelationship looks up a RelationshipSchema by Go field name.
+func findRelationship(schema *EntitySchema, fieldName string) *RelationshipSchema {
+	for i := range schema.Relationships {
+		if schema.Relationships[i].FieldName == fieldName {
+			return &schema.Relationships[i]
+		}
+	}
+	return nil
+}
+
+// loadHasMany implements eager loading for HasMany relationships.
+// It collects parent IDs, queries the related table with an IN clause,
+// groups results by FK, and sets the slice field on each parent entity.
+func (q *QueryBuilder[T]) loadHasMany(schema *EntitySchema, rel *RelationshipSchema, results []T) error {
+	if schema.PrimaryKey == nil {
+		return fmt.Errorf("ego: Include: parent entity %s has no primary key", schema.GoType.Name())
+	}
+
+	// Resolve the related entity's schema.
+	relSchema, err := resolveSchemaForType(q.ex, rel.RelatedType)
+	if err != nil {
+		return fmt.Errorf("ego: Include(%q): %w", rel.FieldName, err)
+	}
+
+	// Collect parent IDs.
+	parentIDs := make([]any, len(results))
+	for i := range results {
+		entityVal := reflect.ValueOf(&results[i]).Elem()
+		parentIDs[i] = entityVal.FieldByIndex(schema.PrimaryKey.Index).Int()
+	}
+
+	// Build: SELECT ... FROM related_table WHERE fk_col IN (?, ?, ?)
+	d := q.ex.dialect()
+	var sb strings.Builder
+	sb.WriteString("SELECT ")
+	for i, col := range relSchema.Columns {
+		if i > 0 {
+			sb.WriteString(", ")
+		}
+		sb.WriteString(d.QuoteIdentifier(col.DBName))
+	}
+	sb.WriteString(" FROM ")
+	sb.WriteString(d.QuoteIdentifier(relSchema.TableName))
+	sb.WriteString(" WHERE ")
+	sb.WriteString(d.QuoteIdentifier(rel.ForeignKey))
+	sb.WriteString(" IN (")
+	placeholders := make([]string, len(parentIDs))
+	for i := range parentIDs {
+		placeholders[i] = d.Placeholder(i + 1)
+	}
+	sb.WriteString(strings.Join(placeholders, ", "))
+	sb.WriteString(")")
+
+	rows, err := q.ex.QueryContext(q.ctx, sb.String(), parentIDs...)
+	if err != nil {
+		return fmt.Errorf("ego: Include(%q): query: %w", rel.FieldName, err)
+	}
+	defer rows.Close()
+
+	// Find the FK column index in the related schema so we can group by it.
+	fkColIdx := -1
+	for i, col := range relSchema.Columns {
+		if col.DBName == rel.ForeignKey {
+			fkColIdx = i
+			break
+		}
+	}
+	if fkColIdx < 0 {
+		return fmt.Errorf("ego: Include(%q): FK column %q not found in %s schema",
+			rel.FieldName, rel.ForeignKey, relSchema.GoType.Name())
+	}
+
+	// Scan results and group by FK value.
+	// grouped maps parent_id -> []reflect.Value (each value is a related entity struct).
+	grouped := make(map[int64][]reflect.Value)
+	for rows.Next() {
+		relEntity := reflect.New(rel.RelatedType).Elem()
+		scanDest := make([]any, len(relSchema.Columns))
+		for i, col := range relSchema.Columns {
+			scanDest[i] = relEntity.FieldByIndex(col.Index).Addr().Interface()
+		}
+		if err := rows.Scan(scanDest...); err != nil {
+			return fmt.Errorf("ego: Include(%q): scan: %w", rel.FieldName, err)
+		}
+		fkVal := relEntity.FieldByIndex(relSchema.Columns[fkColIdx].Index).Int()
+		grouped[fkVal] = append(grouped[fkVal], relEntity)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("ego: Include(%q): %w", rel.FieldName, err)
+	}
+
+	// Set the slice field on each parent entity.
+	sliceType := reflect.SliceOf(rel.RelatedType)
+	for i := range results {
+		entityVal := reflect.ValueOf(&results[i]).Elem()
+		parentID := entityVal.FieldByIndex(schema.PrimaryKey.Index).Int()
+		children := grouped[parentID]
+
+		// Always set a non-nil slice (empty, not nil).
+		slice := reflect.MakeSlice(sliceType, len(children), len(children))
+		for j, child := range children {
+			slice.Index(j).Set(child)
+		}
+		entityVal.FieldByIndex(rel.FieldIndex).Set(slice)
+	}
+
+	return nil
+}
+
+// loadBelongsTo implements eager loading for BelongsTo relationships.
+// It collects FK values from the primary entities, queries the related table
+// with an IN clause, indexes results by ID, and sets the pointer field on each
+// primary entity.
+func (q *QueryBuilder[T]) loadBelongsTo(schema *EntitySchema, rel *RelationshipSchema, results []T) error {
+	// Resolve the related entity's schema.
+	relSchema, err := resolveSchemaForType(q.ex, rel.RelatedType)
+	if err != nil {
+		return fmt.Errorf("ego: Include(%q): %w", rel.FieldName, err)
+	}
+	if relSchema.PrimaryKey == nil {
+		return fmt.Errorf("ego: Include(%q): related entity %s has no primary key",
+			rel.FieldName, relSchema.GoType.Name())
+	}
+
+	// Find the FK column on the primary entity's schema.
+	var fkCol *ColumnSchema
+	for i := range schema.Columns {
+		if schema.Columns[i].DBName == rel.ForeignKey {
+			fkCol = &schema.Columns[i]
+			break
+		}
+	}
+	if fkCol == nil {
+		return fmt.Errorf("ego: Include(%q): FK column %q not found in %s schema",
+			rel.FieldName, rel.ForeignKey, schema.GoType.Name())
+	}
+
+	// Collect unique FK values from the primary entities.
+	fkSet := make(map[int64]bool)
+	for i := range results {
+		entityVal := reflect.ValueOf(&results[i]).Elem()
+		fkVal := entityVal.FieldByIndex(fkCol.Index).Int()
+		if fkVal != 0 {
+			fkSet[fkVal] = true
+		}
+	}
+	if len(fkSet) == 0 {
+		return nil // no FKs to load
+	}
+
+	fkValues := make([]any, 0, len(fkSet))
+	for id := range fkSet {
+		fkValues = append(fkValues, id)
+	}
+
+	// Build: SELECT ... FROM related_table WHERE id IN (?, ?, ?)
+	d := q.ex.dialect()
+	var sb strings.Builder
+	sb.WriteString("SELECT ")
+	for i, col := range relSchema.Columns {
+		if i > 0 {
+			sb.WriteString(", ")
+		}
+		sb.WriteString(d.QuoteIdentifier(col.DBName))
+	}
+	sb.WriteString(" FROM ")
+	sb.WriteString(d.QuoteIdentifier(relSchema.TableName))
+	sb.WriteString(" WHERE ")
+	sb.WriteString(d.QuoteIdentifier(relSchema.PrimaryKey.DBName))
+	sb.WriteString(" IN (")
+	placeholders := make([]string, len(fkValues))
+	for i := range fkValues {
+		placeholders[i] = d.Placeholder(i + 1)
+	}
+	sb.WriteString(strings.Join(placeholders, ", "))
+	sb.WriteString(")")
+
+	rows, err := q.ex.QueryContext(q.ctx, sb.String(), fkValues...)
+	if err != nil {
+		return fmt.Errorf("ego: Include(%q): query: %w", rel.FieldName, err)
+	}
+	defer rows.Close()
+
+	// Scan and index by primary key.
+	indexed := make(map[int64]reflect.Value)
+	for rows.Next() {
+		relEntity := reflect.New(rel.RelatedType) // *RelatedType
+		relEntityElem := relEntity.Elem()          // RelatedType
+		scanDest := make([]any, len(relSchema.Columns))
+		for i, col := range relSchema.Columns {
+			scanDest[i] = relEntityElem.FieldByIndex(col.Index).Addr().Interface()
+		}
+		if err := rows.Scan(scanDest...); err != nil {
+			return fmt.Errorf("ego: Include(%q): scan: %w", rel.FieldName, err)
+		}
+		pkVal := relEntityElem.FieldByIndex(relSchema.PrimaryKey.Index).Int()
+		indexed[pkVal] = relEntity // store as *RelatedType
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("ego: Include(%q): %w", rel.FieldName, err)
+	}
+
+	// Set the pointer field on each primary entity.
+	for i := range results {
+		entityVal := reflect.ValueOf(&results[i]).Elem()
+		fkVal := entityVal.FieldByIndex(fkCol.Index).Int()
+		if related, ok := indexed[fkVal]; ok {
+			entityVal.FieldByIndex(rel.FieldIndex).Set(related)
+		}
+	}
+
+	return nil
 }

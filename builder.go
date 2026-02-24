@@ -2,6 +2,7 @@ package ego
 
 import (
 	"reflect"
+	"strings"
 	"unsafe"
 )
 
@@ -69,6 +70,111 @@ func (pb *PropertyBuilder) IsUnique() *PropertyBuilder {
 func (pb *PropertyBuilder) HasDefault(v any) *PropertyBuilder {
 	pb.col.DefaultValue = v
 	return pb
+}
+
+// RelationshipBuilder provides a fluent API for configuring a relationship.
+type RelationshipBuilder struct {
+	rel *RelationshipSchema
+}
+
+// WithForeignKey overrides the conventional foreign key column name.
+func (rb *RelationshipBuilder) WithForeignKey(fk string) *RelationshipBuilder {
+	rb.rel.ForeignKey = fk
+	return rb
+}
+
+// HasMany registers a one-to-many relationship. The fieldPtr must be a pointer
+// to a []RelatedType slice field on the entity (e.g., &a.Posts).
+// The foreign key is inferred by convention: lowercased parent type name + "_id"
+// (e.g., Author -> "author_id").
+func (b *EntityBuilder[T]) HasMany(fieldPtr any) *RelationshipBuilder {
+	ptrVal := reflect.ValueOf(fieldPtr).Pointer()
+	zeroVal := reflect.ValueOf(b.zero).Elem()
+	t := zeroVal.Type()
+
+	rel := &RelationshipSchema{Type: HasManyRel}
+
+	// Walk struct fields looking for the matching slice field by address.
+	findRelField(t, nil, zeroVal, ptrVal, rel)
+
+	if rel.FieldName != "" {
+		// Infer foreign key: lowercased parent type name + "_id"
+		parentName := t.Name()
+		rel.ForeignKey = strings.ToLower(parentName) + "_id"
+		b.schema.Relationships = append(b.schema.Relationships, *rel)
+	}
+
+	return &RelationshipBuilder{rel: &b.schema.Relationships[len(b.schema.Relationships)-1]}
+}
+
+// BelongsTo registers an inverse one-to-many (belongs-to) relationship.
+// The fieldPtr must be a pointer to a *RelatedType pointer field on the entity
+// (e.g., &p.Author). The foreign key column is on the current entity and is
+// inferred by convention: lowercased related type name + "_id"
+// (e.g., *Author -> "author_id").
+func (b *EntityBuilder[T]) BelongsTo(fieldPtr any) *RelationshipBuilder {
+	ptrVal := reflect.ValueOf(fieldPtr).Pointer()
+	zeroVal := reflect.ValueOf(b.zero).Elem()
+	t := zeroVal.Type()
+
+	rel := &RelationshipSchema{Type: BelongsToRel}
+
+	// Walk struct fields looking for the matching pointer-to-struct field by address.
+	findRelField(t, nil, zeroVal, ptrVal, rel)
+
+	if rel.FieldName != "" {
+		// Infer foreign key: lowercased related type name + "_id"
+		relatedName := rel.RelatedType.Name()
+		rel.ForeignKey = strings.ToLower(relatedName) + "_id"
+		b.schema.Relationships = append(b.schema.Relationships, *rel)
+	}
+
+	return &RelationshipBuilder{rel: &b.schema.Relationships[len(b.schema.Relationships)-1]}
+}
+
+// findRelField walks a struct type recursively (flattening embedded structs)
+// to find a relationship field (slice or pointer-to-struct) matching ptrVal.
+// When found, it populates the RelationshipSchema with field metadata.
+// rootVal must be the reflect.Value of the top-level struct so that
+// FieldByIndex works correctly with the full index path.
+func findRelField(t reflect.Type, indexPrefix []int, rootVal reflect.Value, ptrVal uintptr, rel *RelationshipSchema) {
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+		if !field.IsExported() {
+			continue
+		}
+
+		fieldType := field.Type
+		index := append(append([]int{}, indexPrefix...), field.Index...)
+
+		// Flatten embedded structs.
+		if field.Anonymous && fieldType.Kind() == reflect.Struct {
+			findRelField(fieldType, index, rootVal, ptrVal, rel)
+			continue
+		}
+
+		// Check slice fields (HasMany candidates).
+		if fieldType.Kind() == reflect.Slice {
+			fieldAddr := rootVal.FieldByIndex(index).Addr().Pointer()
+			if fieldAddr == ptrVal {
+				rel.FieldName = field.Name
+				rel.FieldIndex = index
+				rel.RelatedType = fieldType.Elem() // element type of the slice
+				return
+			}
+		}
+
+		// Check pointer-to-struct fields (BelongsTo candidates).
+		if fieldType.Kind() == reflect.Ptr && fieldType.Elem().Kind() == reflect.Struct {
+			fieldAddr := rootVal.FieldByIndex(index).Addr().Pointer()
+			if fieldAddr == ptrVal {
+				rel.FieldName = field.Name
+				rel.FieldIndex = index
+				rel.RelatedType = fieldType.Elem() // the struct type pointed to
+				return
+			}
+		}
+	}
 }
 
 // BuildSchema produces a fully configured EntitySchema for the given entity.

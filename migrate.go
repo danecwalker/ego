@@ -49,6 +49,21 @@ func parseAndRegister(ex Executor, entity any) (*EntitySchema, error) {
 	return schema, nil
 }
 
+// resolveSchemaForType looks up or auto-registers the schema for a given
+// reflect.Type. It creates a zero-value instance of the type and calls
+// parseAndRegister. This is used by Include eager loading to resolve the
+// related entity's schema when only the reflect.Type is known.
+func resolveSchemaForType(ex Executor, t reflect.Type) (*EntitySchema, error) {
+	// Check if already registered.
+	if schema := ex.schemaFor(t); schema != nil {
+		return schema, nil
+	}
+
+	// Create a new pointer to a zero-value instance of the type.
+	entityPtr := reflect.New(t).Interface()
+	return parseAndRegister(ex, entityPtr)
+}
+
 // generateCreateTable produces a CREATE TABLE IF NOT EXISTS DDL statement
 // from the entity schema using the given dialect for quoting and type mapping.
 func generateCreateTable(d Dialect, schema *EntitySchema) string {
